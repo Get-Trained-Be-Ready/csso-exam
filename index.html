@@ -198,6 +198,7 @@ function openEditor(){
   if(isAdminUnlocked()){ go('editor'); return; }
   go('adminlock');
 }
+const RECOVERY_ID='__recovery__';
 function getAdminEligible(){ return S.instructors.filter(i=>i.isAdmin); }
 async function tryAdminUnlock(){
   const sel=document.getElementById('adminWho');
@@ -205,7 +206,8 @@ async function tryAdminUnlock(){
   const err=document.getElementById('adminErr');
   const who=sel?sel.value:'';
   const eligible=getAdminEligible();
-  const match=eligible.find(i=>i.id===who);
+  const isRecovery = who===RECOVERY_ID;
+  const match = isRecovery || eligible.find(i=>i.id===who);
   const hash=await sha256Hex(val);
   if(match && hash===ADMIN_HASH){
     sessionStorage.setItem('csso_admin','1');
@@ -237,26 +239,23 @@ function renderHome(){
   );
 }
 
-/* ADMIN LOCK SCREEN */
+/* ADMIN LOCK SCREEN — always includes a recovery option so a misconfigured
+   instructor list can never fully lock everyone out */
 function renderAdminLock(){
   set('nav-area','<div class="nav-back"><button onclick="goHome()">← Home</button></div>');
   const eligible=getAdminEligible();
-  if(!eligible.length){
-    set('app',
-      '<div class="wrap fade"><div class="card" style="max-width:380px;margin:0 auto;text-align:center">' +
-      '<h2 style="margin-bottom:8px">Admin Access</h2>' +
-      '<p style="color:var(--muted);font-size:.85rem">No instructors are currently flagged as admins. Ask whoever set this up to re-enable an admin from the instructor list.</p>' +
-      '</div></div>'
-    );
-    return;
-  }
-  const opts=eligible.map(i=>'<option value="'+i.id+'">'+esc(i.name)+'</option>').join('');
+  const namedOpts=eligible.map(i=>'<option value="'+i.id+'">'+esc(i.name)+'</option>').join('');
+  const recoveryOpt='<option value="'+RECOVERY_ID+'">— Site Owner (Recovery Access) —</option>';
+  const helperNote = eligible.length
+    ? ''
+    : '<div class="info-box info-amber">No instructors are currently flagged as admin. Use <strong>Site Owner (Recovery Access)</strong> below with the master password, then re-enable an admin in the Instructors tab.</div>';
   set('app',
     '<div class="wrap fade"><div class="card" style="max-width:380px;margin:0 auto">' +
     '<h2 style="margin-bottom:5px">Admin Access</h2>' +
-    '<p style="color:var(--muted);margin-bottom:18px;font-size:.85rem">Select your name and enter the admin password to manage questions and instructors.</p>' +
+    '<p style="color:var(--muted);margin-bottom:14px;font-size:.85rem">Select your name and enter the admin password to manage questions and instructors.</p>' +
+    helperNote +
     '<div class="fg"><label>Your Name</label>' +
-    '<select id="adminWho"><option value="">— Select your name —</option>'+opts+'</select></div>' +
+    '<select id="adminWho"><option value="">— Select your name —</option>'+namedOpts+recoveryOpt+'</select></div>' +
     '<div class="fg"><label>Password</label>' +
     '<input id="adminPw" type="password" placeholder="••••••••" onkeydown="if(event.key===\'Enter\')tryAdminUnlock()"></div>' +
     '<div id="adminErr" class="warn">Incorrect name/password combination. Please try again.</div>' +
