@@ -6,6 +6,7 @@
 <title>Commissioned School Security Officer Exam</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -112,6 +113,10 @@ h3{font-weight:600;font-size:.95rem}
 @keyframes fadeIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
 .fade{animation:fadeIn .2s ease}
 .email-note{font-size:.76rem;color:var(--muted);text-align:center;margin-top:5px}
+.divider{height:1px;background:var(--border);margin:20px 0}
+.gen-status{font-size:.83rem;margin-top:8px;min-height:18px}
+.gen-status.ok{color:var(--green);font-weight:600}
+.gen-status.err{color:var(--red);font-weight:600}
 .q-scroll-list{max-height:400px;overflow-y:auto;border:1.5px solid var(--border);border-radius:8px;margin-top:12px}
 
 </style>
@@ -132,6 +137,8 @@ const S = {
   questions:QUESTION_BANK.map(q=>({...q})),
   instructors:[{"id": "i1", "name": "Rob Jennings", "email": "rob.jennings@gettrainedbeready.com"}, {"id": "i2", "name": "Duke Bender", "email": "duke.bender@gettrainedbeready.com"}, {"id": "i3", "name": "John Bailey", "email": "john.bailey@gettrainedbeready.com"}, {"id": "i4", "name": "John Miller", "email": "john.miller@gettrainedbeready.com"}, {"id": "i5", "name": "Phil Robinson", "email": "phil.robinson@gettrainedbeready.com"}, {"id": "i6", "name": "Marvin Kelley", "email": "marvin.kelley@gettrainedbeready.com"}], student:{name:'',email:'',instId:''},
   answers:{}, results:null, edTab:'questions',
+  emailjs:{publicKey:'vT52P-d6KS2Z2kpfT',serviceId:'service_ppq5oh8',templateId:'template_e2t6354'},
+  sendStatus:null,
 };
 
 const TF_IDS = new Set(QUESTION_BANK.slice(0,40).map(q=>q.id).concat(['q120']));
@@ -145,10 +152,11 @@ function loadData(){
     if(p.instructors) S.instructors=p.instructors;
     if(p.title)       S.title=p.title;
     if(p.questions)   S.questions=p.questions;
+    if(p.emailjs)      S.emailjs=p.emailjs;
   }catch(e){}
 }
 function saveData(){
-  try{ localStorage.setItem('csso_data',JSON.stringify({title:S.title,questions:S.questions,instructors:S.instructors})); }catch(e){}
+  try{ localStorage.setItem('csso_data',JSON.stringify({title:S.title,questions:S.questions,instructors:S.instructors,emailjs:S.emailjs})); }catch(e){}
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -355,16 +363,18 @@ function renderResults(){
     '<div class="ring-text"><div class="ring-pct">'+pct+'%</div><div class="ring-sub">'+correct+'/'+total+' correct</div></div>' +
     '</div><div class="grade-badge" style="color:'+g.c+';background:'+g.bg+'">Grade: '+g.l+'</div></div>' +
     '<div class="btn-row" style="justify-content:center;margin-bottom:6px">' +
-    '<button class="btn btn-amber btn-lg" onclick="makePDF()">⬇ Download PDF</button>' +
-    '<button class="btn btn-primary btn-lg" onclick="sendEmail()">✉️ Send Results</button>' +
+    '<button class="btn btn-primary btn-lg" id="sendBtn" onclick="sendEmail()">✉️ Email My Results</button>' +
+    '<button class="btn btn-outline btn-lg" onclick="makePDF()">⬇ Download PDF</button>' +
     '</div>' +
-    '<p class="email-note">Download the PDF first, then attach it when your email app opens.</p>' +
-    (inst?'<p style="font-size:.76rem;color:var(--muted);margin-top:4px">Sent to: <strong>'+esc(inst.name)+'</strong> &nbsp;&middot;&nbsp; CC\'d to you</p>':'') +
+    '<div id="sendStatus" class="gen-status" style="text-align:center"></div>' +
+    (inst?'<p style="font-size:.76rem;color:var(--muted);margin-top:4px">Sends to: <strong>'+esc(inst.name)+'</strong> &nbsp;&middot;&nbsp; CC\'d to you</p>':'') +
     '</div>' +
     '<h3 style="margin-bottom:9px;padding:0 2px">Question Breakdown</h3>' +
     breakdown + '</div>'
   );
   setTimeout(()=>{const el=document.getElementById('rf');if(el)el.style.strokeDashoffset=offset;},80);
+  // Auto-send the moment results appear — no extra tap needed
+  setTimeout(()=>{ sendEmail(); }, 300);
 }
 
 /* PDF */
@@ -412,23 +422,71 @@ function makePDF(){
   doc.save(S.student.name.replace(/\s+/g,'_')+'_CSSO_Exam_Results.pdf');
 }
 
-/* EMAIL */
-function sendEmail(){
+/* EMAIL — sent via EmailJS, no mail client required on the device */
+function buildBreakdownText(){
   const {correct,total,pct,date}=S.results, g=gradeFor(pct);
   const inst=S.instructors.find(i=>i.id===S.student.instId);
-  let body='CSSO EXAM RESULTS\n'+'='.repeat(46)+'\n\n';
-  body+='Student    : '+S.student.name+'\nEmail      : '+S.student.email+'\nInstructor : '+(inst?inst.name:'')+'\nDate       : '+date+'\n\n';
-  body+='SCORE: '+correct+'/'+total+' ('+pct+'%) — Grade: '+g.l+'\n\nQUESTION BREAKDOWN\n'+'─'.repeat(42)+'\n';
+  let body='QUESTION BREAKDOWN\n'+'─'.repeat(42)+'\n';
   S.questions.forEach((q,i)=>{
     const sa=S.answers[q.id],ok=sa===q.correct;
     body+='\n['+(ok?'PASS':'FAIL')+'] Q'+(i+1)+': '+q.text+'\n  Your answer: '+answerLabel(q,sa)+'\n';
     if(!ok) body+='  Correct: '+answerLabel(q,q.correct)+'\n';
   });
-  body+='\n\n(Please attach the PDF downloaded from the exam app.)';
-  const to=encodeURIComponent(inst?inst.email:'');
-  const cc=encodeURIComponent(S.student.email);
-  const sub=encodeURIComponent('CSSO Exam Results — '+S.student.name+' — '+pct+'%');
-  window.location.href='mailto:'+to+'?cc='+cc+'&subject='+sub+'&body='+encodeURIComponent(body);
+  return body;
+}
+
+function emailjsConfigured(){
+  return !!(S.emailjs.publicKey && S.emailjs.serviceId && S.emailjs.templateId);
+}
+
+async function sendEmail(){
+  const statusEl=document.getElementById('sendStatus');
+  const btn=document.getElementById('sendBtn');
+
+  if(!emailjsConfigured()){
+    if(statusEl){
+      statusEl.className='gen-status err';
+      statusEl.textContent='Email sending is not configured yet. An administrator needs to add EmailJS keys in Edit & Setup → Settings.';
+    }
+    return;
+  }
+
+  const {correct,total,pct,date}=S.results, g=gradeFor(pct);
+  const inst=S.instructors.find(i=>i.id===S.student.instId);
+  if(!inst){
+    if(statusEl){statusEl.className='gen-status err';statusEl.textContent='No instructor on file for this submission.';}
+    return;
+  }
+
+  if(btn){btn.disabled=true;btn.textContent='✉️ Sending…';}
+  if(statusEl){statusEl.className='gen-status';statusEl.textContent='Sending your results…';}
+
+  try{
+    emailjs.init({publicKey:S.emailjs.publicKey});
+    const params={
+      to_email: inst.email,
+      cc_email: S.student.email,
+      student_name: S.student.name,
+      instructor_name: inst.name,
+      exam_title: S.title,
+      score_line: correct+' / '+total+'  ('+pct+'%)  —  Grade: '+g.l,
+      date: date,
+      breakdown: buildBreakdownText(),
+    };
+    await emailjs.send(S.emailjs.serviceId, S.emailjs.templateId, params);
+    if(statusEl){
+      statusEl.className='gen-status ok';
+      statusEl.textContent='✅ Results sent to '+inst.name+' and a copy to you at '+S.student.email+'.';
+    }
+    if(btn){btn.textContent='✓ Sent';}
+  }catch(err){
+    if(statusEl){
+      statusEl.className='gen-status err';
+      statusEl.textContent='Could not send automatically (the connection may have dropped). Please use Download PDF and email it manually, or try again.';
+    }
+    if(btn){btn.disabled=false;btn.textContent='✉️ Email My Results';}
+    console.error('EmailJS error:', err);
+  }
 }
 
 /* EDITOR */
@@ -544,9 +602,24 @@ function addInst(){S.instructors.push({id:uid(),name:'',email:''});renderEdBody(
 function removeInst(i){if(!confirm('Remove this instructor?')) return;S.instructors.splice(i,1);renderEdBody();}
 
 function buildSettingsTab(){
+  const ej=S.emailjs;
+  const statusBadge = emailjsConfigured()
+    ? '<span style="color:var(--green);font-weight:600;font-size:.8rem">✓ Configured</span>'
+    : '<span style="color:var(--red);font-weight:600;font-size:.8rem">⚠ Not configured — emailing results will not work</span>';
   return '<h3 style="margin-bottom:14px">General Settings</h3>' +
     '<div class="fg"><label>Exam Title</label>' +
-    '<input type="text" id="cfgTitle" value="'+esc(S.title)+'" oninput="S.title=this.value"></div>';
+    '<input type="text" id="cfgTitle" value="'+esc(S.title)+'" oninput="S.title=this.value"></div>' +
+    '<div class="divider"></div>' +
+    '<h3 style="margin-bottom:5px">Email Delivery (EmailJS)</h3>' +
+    '<p style="font-size:.83rem;color:var(--muted);margin-bottom:10px">Results are sent automatically via <a href="https://www.emailjs.com" target="_blank" style="color:var(--navy);font-weight:600">EmailJS</a> — no mail app needed on the student\'s device. Paste in the 3 values from your EmailJS account below.</p>' +
+    '<p style="margin-bottom:14px">'+statusBadge+'</p>' +
+    '<div class="fg"><label>Public Key</label>' +
+    '<input type="text" id="ejPublicKey" value="'+esc(ej.publicKey)+'" placeholder="e.g. AbCdEfGhIjKlMnOp" oninput="S.emailjs.publicKey=this.value"></div>' +
+    '<div class="fg"><label>Service ID</label>' +
+    '<input type="text" id="ejServiceId" value="'+esc(ej.serviceId)+'" placeholder="e.g. service_abc1234" oninput="S.emailjs.serviceId=this.value"></div>' +
+    '<div class="fg"><label>Template ID</label>' +
+    '<input type="text" id="ejTemplateId" value="'+esc(ej.templateId)+'" placeholder="e.g. template_xyz5678" oninput="S.emailjs.templateId=this.value"></div>' +
+    '<p style="font-size:.78rem;color:var(--muted)">Find these under <strong>Account → General</strong> (Public Key) and <strong>Email Services</strong> / <strong>Email Templates</strong> in your EmailJS dashboard.</p>';
 }
 
 function saveAll(){
