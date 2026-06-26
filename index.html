@@ -141,6 +141,7 @@ const S = {
   answers:{}, results:null, edTab:'questions',
   emailjs:{publicKey:'vT52P-d6KS2Z2kpfT',serviceId:'service_ppq5oh8',templateId:'template_e2t6354'},
   sendStatus:null,
+  adminHashOverride:null,
 };
 
 const TF_IDS = new Set(QUESTION_BANK.slice(0,40).map(q=>q.id).concat(['q120','q65','q69','q71','q74','q78','q86','q88','q93','q97','q101','q104','q112']));
@@ -155,10 +156,11 @@ function loadData(){
     if(p.title)       S.title=p.title;
     if(p.questions)   S.questions=p.questions;
     if(p.emailjs)      S.emailjs=p.emailjs;
+    if(p.adminHashOverride!==undefined) S.adminHashOverride=p.adminHashOverride;
   }catch(e){}
 }
 function saveData(){
-  try{ localStorage.setItem('csso_data',JSON.stringify({title:S.title,questions:S.questions,instructors:S.instructors,emailjs:S.emailjs})); }catch(e){}
+  try{ localStorage.setItem('csso_data',JSON.stringify({title:S.title,questions:S.questions,instructors:S.instructors,emailjs:S.emailjs,adminHashOverride:S.adminHashOverride})); }catch(e){}
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -187,12 +189,45 @@ function render(){
 function startExam(){ if(S.instructors.length>0) go('info'); }
 function goHome(){ go('home'); }
 
+/* ── SITE-WIDE ACCESS GATE (keeps the general public out) ── */
+const SITE_HASH = 'c1b3863c8b65623690dde2ad364a92b26c38c1c80a86a4da4da6f8446cc50184';
+function isSiteUnlocked(){ return sessionStorage.getItem('csso_site')==='1'; }
+async function trySiteUnlock(){
+  const val=document.getElementById('sitePw').value;
+  const err=document.getElementById('siteErr');
+  const hash=await sha256Hex(val);
+  if(hash===SITE_HASH){
+    sessionStorage.setItem('csso_site','1');
+    bootApp();
+  } else {
+    if(err) err.classList.add('show');
+    document.getElementById('sitePw').value='';
+    document.getElementById('sitePw').focus();
+  }
+}
+function renderSiteLock(){
+  set('hdr-right',''); set('nav-area','');
+  set('app',
+    '<div class="wrap fade" style="padding-top:60px">' +
+    '<div class="card" style="max-width:380px;margin:0 auto;text-align:center">' +
+    '<h2 style="margin-bottom:6px">'+esc(S.title)+'</h2>' +
+    '<p style="color:var(--muted);margin-bottom:18px;font-size:.85rem">This exam is password protected. Enter the access code to continue.</p>' +
+    '<div class="fg" style="text-align:left"><label>Access Password</label>' +
+    '<input id="sitePw" type="password" placeholder="••••••••" onkeydown="if(event.key===\'Enter\')trySiteUnlock()"></div>' +
+    '<div id="siteErr" class="warn">Incorrect password. Please try again.</div>' +
+    '<button class="btn btn-primary btn-full btn-lg" style="margin-top:6px" onclick="trySiteUnlock()">Enter</button>' +
+    '</div></div>'
+  );
+  setTimeout(()=>{ const el=document.getElementById('sitePw'); if(el) el.focus(); },50);
+}
+
 /* ── ADMIN AUTH ── */
 const ADMIN_HASH = 'a019f6073a5e50f127c7cffb8ed1a977bd5209b5842e3e9484d4134cf5e13bbd';
 async function sha256Hex(str){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
+function getCurrentAdminHash(){ return S.adminHashOverride || ADMIN_HASH; }
 function isAdminUnlocked(){ return sessionStorage.getItem('csso_admin')==='1'; }
 function openEditor(){
   if(isAdminUnlocked()){ go('editor'); return; }
@@ -205,11 +240,17 @@ async function tryAdminUnlock(){
   const val=document.getElementById('adminPw').value;
   const err=document.getElementById('adminErr');
   const who=sel?sel.value:'';
-  const eligible=getAdminEligible();
   const isRecovery = who===RECOVERY_ID;
-  const match = isRecovery || eligible.find(i=>i.id===who);
   const hash=await sha256Hex(val);
-  if(match && hash===ADMIN_HASH){
+  let ok=false;
+  if(isRecovery){
+    ok = hash===ADMIN_HASH; // always the original master password — never changes, even if the regular one does
+  } else {
+    const eligible=getAdminEligible();
+    const match=eligible.find(i=>i.id===who);
+    ok = !!match && hash===getCurrentAdminHash();
+  }
+  if(ok){
     sessionStorage.setItem('csso_admin','1');
     go('editor');
   } else {
@@ -248,7 +289,7 @@ function renderAdminLock(){
   const recoveryOpt='<option value="'+RECOVERY_ID+'">— Site Owner (Recovery Access) —</option>';
   const helperNote = eligible.length
     ? ''
-    : '<div class="info-box info-amber">No instructors are currently flagged as admin. Use <strong>Site Owner (Recovery Access)</strong> below with the master password, then re-enable an admin in the Instructors tab.</div>';
+    : '<div class="info-box info-amber">No instructors are currently flagged as admin. Use <strong>Site Owner (Recovery Access)</strong> below with the original master password you first set up, then re-enable an admin in the Instructors tab.</div>';
   set('app',
     '<div class="wrap fade"><div class="card" style="max-width:380px;margin:0 auto">' +
     '<h2 style="margin-bottom:5px">Admin Access</h2>' +
@@ -617,9 +658,19 @@ function buildInstructorsTab(){
     '<p style="color:var(--muted);font-size:.84rem;margin-bottom:6px">Students select their instructor when starting the exam. Results are emailed to the selected instructor.</p>' +
     '<p style="color:var(--muted);font-size:.84rem;margin-bottom:18px">Check <strong>Admin</strong> for anyone who should be able to log into Edit &amp; Setup. Unchecked instructors still receive exam results — they just can\'t access this editor.</p>' +
     '<div id="instList">'+rows+'</div>' +
-    '<button class="btn btn-outline" style="margin-top:12px" onclick="addInst()">+ Add Instructor</button>';
+    '<div class="btn-row" style="margin-top:12px">' +
+    '<button class="btn btn-outline" onclick="addInst()">+ Add Instructor</button>' +
+    '<button class="btn btn-danger" onclick="resetAdminsToDefault()">↺ Reset Admins to Default</button>' +
+    '</div>';
 }
 function addInst(){S.instructors.push({id:uid(),name:'',email:'',isAdmin:false});renderEdBody();}
+function resetAdminsToDefault(){
+  if(!confirm('Reset admin access back to default — only Rob Jennings and Duke Bender will be able to log into Edit & Setup. This does not change names, emails, or the student-facing instructor list. Continue?')) return;
+  const DEFAULT_ADMINS=['Rob Jennings','Duke Bender'];
+  S.instructors.forEach(inst=>{ inst.isAdmin = DEFAULT_ADMINS.includes(inst.name); });
+  saveData();
+  renderEdBody();
+}
 function removeInst(i){
   const inst=S.instructors[i];
   const otherAdminsRemain = S.instructors.some((x,idx)=> idx!==i && x.isAdmin);
@@ -660,7 +711,45 @@ function buildSettingsTab(){
     '<input type="text" id="ejServiceId" value="'+esc(ej.serviceId)+'" placeholder="e.g. service_abc1234" oninput="S.emailjs.serviceId=this.value"></div>' +
     '<div class="fg"><label>Template ID</label>' +
     '<input type="text" id="ejTemplateId" value="'+esc(ej.templateId)+'" placeholder="e.g. template_xyz5678" oninput="S.emailjs.templateId=this.value"></div>' +
-    '<p style="font-size:.78rem;color:var(--muted)">Find these under <strong>Account → General</strong> (Public Key) and <strong>Email Services</strong> / <strong>Email Templates</strong> in your EmailJS dashboard.</p>';
+    '<p style="font-size:.78rem;color:var(--muted)">Find these under <strong>Account → General</strong> (Public Key) and <strong>Email Services</strong> / <strong>Email Templates</strong> in your EmailJS dashboard.</p>' +
+    '<div class="divider"></div>' +
+    '<h3 style="margin-bottom:5px">Admin Password</h3>' +
+    '<p style="font-size:.83rem;color:var(--muted);margin-bottom:6px">'+(S.adminHashOverride?'A custom password is currently set.':'Using the original default password.')+'</p>' +
+    '<div class="fg"><label>New Password</label>' +
+    '<input type="password" id="newAdminPw" placeholder="At least 6 characters"></div>' +
+    '<div class="fg"><label>Confirm New Password</label>' +
+    '<input type="password" id="confirmAdminPw" placeholder="Re-enter new password"></div>' +
+    '<div id="pwUpdateMsg" class="gen-status"></div>' +
+    '<div class="btn-row" style="margin-top:6px">' +
+    '<button class="btn btn-primary" onclick="updateAdminPassword()">Update Password</button>' +
+    '<button class="btn btn-outline" onclick="resetAdminPasswordToDefault()">Reset to Original</button>' +
+    '</div>' +
+    '<p style="font-size:.78rem;color:var(--muted);margin-top:10px">Note: the <strong>Site Owner (Recovery Access)</strong> option on the lock screen always uses the very first/original password, no matter what you set here — that\'s intentional, so it always works as a permanent fallback.</p>';
+}
+
+async function updateAdminPassword(){
+  const p1=document.getElementById('newAdminPw').value;
+  const p2=document.getElementById('confirmAdminPw').value;
+  const msg=document.getElementById('pwUpdateMsg');
+  if(!p1 || p1.length<6){
+    if(msg){msg.className='gen-status err';msg.textContent='Password must be at least 6 characters.';}
+    return;
+  }
+  if(p1!==p2){
+    if(msg){msg.className='gen-status err';msg.textContent='Passwords do not match.';}
+    return;
+  }
+  S.adminHashOverride = await sha256Hex(p1);
+  saveData();
+  document.getElementById('newAdminPw').value='';
+  document.getElementById('confirmAdminPw').value='';
+  if(msg){msg.className='gen-status ok';msg.textContent='✓ Admin password updated. Use the new password next time you log in (named instructors only — Recovery Access is unaffected).';}
+}
+function resetAdminPasswordToDefault(){
+  if(!confirm('Reset the admin password back to the original default?')) return;
+  S.adminHashOverride=null;
+  saveData();
+  renderEdBody();
 }
 
 function saveAll(){
@@ -670,8 +759,15 @@ function saveAll(){
 }
 function saveExit(){saveData();goHome();}
 
-loadData();
-render();
+function bootApp(){
+  loadData();
+  render();
+}
+if(isSiteUnlocked()){
+  bootApp();
+} else {
+  renderSiteLock();
+}
 
 </script>
 </body>
