@@ -182,7 +182,7 @@ function answerLabel(q,idx){
 
 function render(){
   set('app',''); set('nav-area',''); set('hdr-right','');
-  ({home:renderHome,info:renderInfo,test:renderTest,results:renderResults,editor:renderEditor,adminlock:renderAdminLock}[S.mode]||renderHome)();
+  ({home:renderHome,info:renderInfo,test:renderTest,results:renderResults,editor:renderEditor,adminlock:renderAdminLock,reviewlock:renderReviewLock,review:renderReview}[S.mode]||renderHome)();
 }
 
 /* Named helpers to avoid quote-in-onclick issues */
@@ -222,7 +222,8 @@ function renderSiteLock(){
 }
 
 /* ── ADMIN AUTH ── */
-const ADMIN_HASH = 'a019f6073a5e50f127c7cffb8ed1a977bd5209b5842e3e9484d4134cf5e13bbd';
+const ADMIN_HASH = 'aecbc7e9c59361b3a2560343d797abd72332984ce327542e6c961b09684e1f7e';
+const REVIEW_HASH = 'a019f6073a5e50f127c7cffb8ed1a977bd5209b5842e3e9484d4134cf5e13bbd';
 async function sha256Hex(str){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -260,6 +261,70 @@ async function tryAdminUnlock(){
   }
 }
 
+/* ── REVIEW ACCESS (read-only — view questions & answers, no edit/delete) ── */
+function isReviewUnlocked(){ return sessionStorage.getItem('csso_review')==='1'; }
+function openReview(){
+  if(isReviewUnlocked()){ go('review'); return; }
+  go('reviewlock');
+}
+async function tryReviewUnlock(){
+  const val=document.getElementById('reviewPw').value;
+  const err=document.getElementById('reviewErr');
+  const hash=await sha256Hex(val);
+  if(hash===REVIEW_HASH){
+    sessionStorage.setItem('csso_review','1');
+    go('review');
+  } else {
+    if(err) err.classList.add('show');
+    document.getElementById('reviewPw').value='';
+    document.getElementById('reviewPw').focus();
+  }
+}
+function renderReviewLock(){
+  set('nav-area','<div class="nav-back"><button onclick="goHome()">← Home</button></div>');
+  set('app',
+    '<div class="wrap fade"><div class="card" style="max-width:380px;margin:0 auto">' +
+    '<h2 style="margin-bottom:5px">Review Access</h2>' +
+    '<p style="color:var(--muted);margin-bottom:18px;font-size:.85rem">Enter the review password to view all questions and correct answers. Read-only — nothing can be changed here.</p>' +
+    '<div class="fg"><label>Password</label>' +
+    '<input id="reviewPw" type="password" placeholder="••••••••" onkeydown="if(event.key===\'Enter\')tryReviewUnlock()"></div>' +
+    '<div id="reviewErr" class="warn">Incorrect password. Please try again.</div>' +
+    '<button class="btn btn-primary btn-full btn-lg" style="margin-top:6px" onclick="tryReviewUnlock()">Unlock</button>' +
+    '</div></div>'
+  );
+  setTimeout(()=>{ const el=document.getElementById('reviewPw'); if(el) el.focus(); },50);
+}
+function renderReview(){
+  if(!isReviewUnlocked()){ go('reviewlock'); return; }
+  set('nav-area','<div class="nav-back"><button onclick="goHome()">← Home</button></div>');
+  let qHtml='';
+  S.questions.forEach((q,idx)=>{
+    const tf=isTF(q);
+    let opts='';
+    q.options.forEach((o,i)=>{
+      const lbl=tf?(i===0?'T':'F'):LTRS[i];
+      const isCorrect=i===q.correct;
+      opts+='<div class="opt'+(isCorrect?' ok':'')+'" style="cursor:default">' +
+        '<span class="bubble">'+lbl+'</span><span>'+esc(o)+(isCorrect?' &nbsp;✓ Correct':'')+'</span></div>';
+    });
+    qHtml+='<div class="q-card">' +
+      '<div class="q-num-row"><span class="q-num">Q'+(idx+1)+'</span>' +
+      '<span class="q-badge '+(tf?'tf':'mc')+'">'+(tf?'True / False':'Multiple Choice')+'</span></div>' +
+      '<div class="q-text">'+esc(q.text)+'</div>' +
+      '<div class="opts">'+opts+'</div>' +
+      '</div>';
+  });
+  set('app',
+    '<div class="wrap fade">' +
+    '<div style="text-align:center;padding:10px 0 18px">' +
+    '<h2 style="margin-bottom:4px">Question Review</h2>' +
+    '<p style="color:var(--muted);font-size:.85rem">Read-only — correct answers are marked with a check. '+S.questions.length+' total questions.</p>' +
+    '</div>' +
+    qHtml +
+    '</div>'
+  );
+}
+
 /* HOME (students only — no editor link visible) */
 function renderHome(){
   const n=S.questions.length, hasI=S.instructors.length>0;
@@ -275,7 +340,11 @@ function renderHome(){
     '<div class="home-card-icon">📝</div><h3>Take the Exam</h3>' +
     '<p>'+(hasI?'Enter your details and begin the exam':'Exam setup is not complete yet. Please check with your instructor.')+'</p>' +
     '</div></div>' +
-    '<p style="text-align:center;margin-top:28px"><a href="#" onclick="openEditor();return false;" style="font-size:.72rem;color:var(--muted);text-decoration:none">Admin Access</a></p>' +
+    '<p style="text-align:center;margin-top:28px">' +
+    '<a href="#" onclick="openReview();return false;" style="font-size:.72rem;color:var(--muted);text-decoration:none">Review Access</a>' +
+    '<span style="font-size:.72rem;color:var(--border);margin:0 8px">&middot;</span>' +
+    '<a href="#" onclick="openEditor();return false;" style="font-size:.72rem;color:var(--muted);text-decoration:none">Admin Access</a>' +
+    '</p>' +
     '</div>'
   );
 }
