@@ -294,9 +294,21 @@ function renderReviewLock(){
   );
   setTimeout(()=>{ const el=document.getElementById('reviewPw'); if(el) el.focus(); },50);
 }
+function clearCacheAndReload(){
+  if(!confirm('This will clear your local browser cache for this site (saved settings, instructor list, question edits) and reload the page fresh from the server. The questions and instructor list baked into the file will be restored. Continue?')) return;
+  localStorage.removeItem('csso_data');
+  sessionStorage.clear();
+  window.location.reload(true);
+}
+
 function renderReview(){
   if(!isReviewUnlocked()){ go('reviewlock'); return; }
-  set('nav-area','<div class="nav-back"><button onclick="goHome()">← Home</button></div>');
+  set('nav-area',
+    '<div class="nav-back" style="display:flex;justify-content:space-between;align-items:center;padding-right:16px">' +
+    '<button onclick="goHome()">← Home</button>' +
+    '<button onclick="clearCacheAndReload()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;font-family:\'Inter\',sans-serif;">🗑 Clear Cache &amp; Reload</button>' +
+    '</div>'
+  );
   let qHtml='';
   S.questions.forEach((q,idx)=>{
     const tf=isTF(q);
@@ -621,7 +633,12 @@ async function sendEmail(){
 /* EDITOR */
 function renderEditor(){
   if(!isAdminUnlocked()){ go('adminlock'); return; }
-  set('nav-area','<div class="nav-back-w"><button onclick="saveExit()">← Save &amp; Exit</button></div>');
+  set('nav-area',
+    '<div class="nav-back-w" style="display:flex;justify-content:space-between;align-items:center;padding-right:16px">' +
+    '<button onclick="saveExit()">← Save &amp; Exit</button>' +
+    '<button onclick="clearCacheAndReload()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;font-family:\'Inter\',sans-serif;">🗑 Clear Cache &amp; Reload</button>' +
+    '</div>'
+  );
   set('hdr-right','<button class="btn btn-ghost btn-sm" onclick="saveAll()">💾 Save</button>');
   const tabDefs=[
     {id:'questions',label:'📋 Questions ('+S.questions.length+')'},
