@@ -198,6 +198,7 @@ async function trySiteUnlock(){
   const hash=await sha256Hex(val);
   if(hash===SITE_HASH){
     sessionStorage.setItem('csso_site','1');
+    localStorage.removeItem('csso_data'); // always start fresh — prevents stale exam data on shared/retaken devices
     bootApp();
   } else {
     if(err) err.classList.add('show');
