@@ -295,7 +295,7 @@ function renderReviewLock(){
   setTimeout(()=>{ const el=document.getElementById('reviewPw'); if(el) el.focus(); },50);
 }
 function clearCacheAndReload(){
-  if(!confirm('This will clear your local browser cache for this site (saved settings, instructor list, question edits) and reload the page fresh from the server. The questions and instructor list baked into the file will be restored. Continue?')) return;
+  if(!confirm('This will reset this app on your device back to the latest version from the server — clearing any locally saved settings. Your other browser data (passwords, history, other sites) will not be affected. Continue?')) return;
   localStorage.removeItem('csso_data');
   sessionStorage.clear();
   window.location.reload(true);
